@@ -13,7 +13,7 @@
     ├── .env # 环境变量
     └── requirements.txt # 依赖清单
     
-  # 2 功能实现顺序
+  ## 功能实现顺序
   
     1.数据库连接管理模块
     2.LangGraph 基础工作流框架
@@ -24,7 +24,7 @@
     4.身份认证模块
     5.API 接口层
 
-# core模块配置
+# 2.core模块配置
   ## init.py
   ## database.py
   
