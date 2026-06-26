@@ -7,7 +7,7 @@ env/
 
  Secrets
 .env
-
+.prject_content
 .idea/
 *.log
 
