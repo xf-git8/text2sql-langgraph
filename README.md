@@ -1,5 +1,5 @@
 1.项目初始化，构建项目结构
-    text2sql-langgraph/
+  text2sql-langgraph/
     ├── app/
     │ ├── config/
     │ │ └── settings.py # 配置管理
@@ -22,7 +22,10 @@
     - 完整的 Agent 工作流
     - 身份认证模块
     - API 接口层
-
+    
+    - webui界面
+    - 测试与部署
+    - 项目维护与更新
 2.core模块配置init.py
   -database.py
     - 数据库连接与重试机制（指数退避）
@@ -47,7 +50,7 @@
         利用向量数据库根据用户问题检索相关的表结构，减少上下文长度并提高准确性
       - 使用 all-MiniLM-L6-v2 模型生成表结构向量
       - 使用 Chroma 构建本地向量数据库(检索之前进行问题分析改写)
-      - 基于用户问题检索相关表结构（j）
+      - 基于用户问题检索相关表结构
       - 将表结构格式化为 LLM 可理解的 Prompt
       - 支持重建向量库
     -Result结果格式化服务
@@ -58,11 +61,12 @@
 4.实现LangGraph基本工作流程
     工作流中的“短路机制”： 
     通过在每个节点内部统一加入 if state["intention"] == "invalid": return state 的前置检查，
-    配合 should_retry 中的条件判断，系统能够极其高效地拦截无效请求。
-    对于无效问题，系统完全不会去调用昂贵的 LLM 生成 SQL 或访问数据库，
-    从而极大地节省了计算资源和响应时间。
+    配合 should_retry 中的条件判断，系统能够极其高效地拦截无效请求。 对于无效问题，系统完全不会去调用昂贵的 LLM 生成 SQL 或访问数据库， 从而极大地节省了计算资源和响应时间。
     AgentState 状态定义（包含问题、表结构、SQL、结果等） 
     6个节点：process_question、generate_sql、validate_sql、execute_sql、retry_correction、summarize
     条件路由：执行失败时自动重试修正（最多max_retries次）
     完整的工作流：问题处理 → SQL生成 → 校验 → 执行 → 重试修正 → 总结
 5.实现身份认证模块添加权限
+   OAuth2 Password Bearer + JWT Refresh Token Rotation 认证体系。
+   整个流程分为“首次登录”、“资源访问”和“无感刷新”三个核心阶段。生产环境引入redis缓存，提升性能。
+6.实现API接口层 
