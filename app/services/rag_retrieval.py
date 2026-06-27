@@ -5,15 +5,15 @@ from langchain_core.documents import Document
 from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings import HuggingFaceEmbeddings
 
-from app.core.database import db_manager
-from app.processors.question_processor import QuestionProcessor, question_processor
+from app.core import db_manager
+from app.services.question_process import question_processor
 
 # 日志配置
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-class SchemaRetrieval:
+class RagRetrieval:
     """ Schema Retrieval 类，用于从数据库中检索表结构信息，并生成嵌入向量用于向量数据库存储。"""
 
     def __init__(self):
@@ -210,3 +210,6 @@ class SchemaRetrieval:
             if schema:
                 schemas[table_name] = schema
         return schemas
+
+
+rag_retrival = RagRetrieval()

@@ -135,7 +135,7 @@ class QuestionProcessor:
                 "analysis_result": analysis.json(),
                 "format_instructions": self.rewrite_parser.get_format_instructions()
             })
-            logger.info(f"问题改写成功: {result.rewritten_question}")
+            logger.info(f"问题改写成功: {rewrite_result.rewritten_question}")
             return {
                 "status": "success",
                 "original": question,

@@ -61,7 +61,8 @@
     配合 should_retry 中的条件判断，系统能够极其高效地拦截无效请求。
     对于无效问题，系统完全不会去调用昂贵的 LLM 生成 SQL 或访问数据库，
     从而极大地节省了计算资源和响应时间。
-  - 定义 Agent 状态（State）
-  - 定义节点（Node）：检索表结构、生成SQL、执行SQL、总结回答
-  - 定义边（Edge）：条件路由逻辑
-  - 创建 Graph 实例
+    AgentState 状态定义（包含问题、表结构、SQL、结果等） 
+    6个节点：process_question、generate_sql、validate_sql、execute_sql、retry_correction、summarize
+    条件路由：执行失败时自动重试修正（最多max_retries次）
+    完整的工作流：问题处理 → SQL生成 → 校验 → 执行 → 重试修正 → 总结
+5.实现身份认证模块添加权限
