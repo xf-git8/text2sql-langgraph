@@ -17,7 +17,7 @@ class QuestionAnalysis(BaseModel):
     intention: Literal["data_query", "data_analysis", "schema_query", "invalid"] = Field(
         ..., description="问题意图分类")
     needs_rewrite: bool = Field(..., description="是否需要重写")
-    enties: List[str] = Field(..., description="实体列表,不确定可以为空")
+    entities: List[str] = Field(..., description="实体列表,不确定可以为空")
     keywords: List[str] = Field(..., description="关键词列表,不确定可以为空")
     confidence: float = Field(..., description="置信度")
     reason: str = Field(..., description="分析思路原因")
@@ -109,8 +109,7 @@ class QuestionProcessor:
             QuestionRewrite: 问题改写结果
         """
         try:
-            # 分析
-            analysis = self.analyze(question)
+            analysis = analysis_result
             # 2. 处理无效或无需改写的情况
             if analysis.intention == "invalid":
                 return {
@@ -132,7 +131,7 @@ class QuestionProcessor:
             # 3. 改写
             rewrite_result = self.rewrite_chain.invoke({
                 "question": question,
-                "analysis_result": analysis.json(),
+                "analysis_result": analysis.model_dump_json(),
                 "format_instructions": self.rewrite_parser.get_format_instructions()
             })
             logger.info(f"问题改写成功: {rewrite_result.rewritten_question}")
@@ -151,7 +150,7 @@ class QuestionProcessor:
                 "status": "error",
                 "message": "抱歉，我无法理解您的问题。",
                 "original": question,
-                "intention": analysis.intention
+                "intention": analysis_result.intention
                 }
 # 全局单例
 question_processor = QuestionProcessor()

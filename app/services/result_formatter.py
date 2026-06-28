@@ -4,10 +4,14 @@
 - 结果长度限制防止超出模型上下文
 - 降级方案：简单格式化作为兜底
 """
+import json
 import logging
-from langchain_openai import ChatOpenAI
+from decimal import Decimal
+from datetime import date, datetime
 from typing import List, Dict, Any, Union
-from langchain.prompts import ChatPromptTemplate
+
+from langchain_openai import ChatOpenAI
+from langchain_core.prompts import ChatPromptTemplate
 
 from app.config.settings import settings
 
@@ -17,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 class ResultFormatter:
     """查询结果格式化器，将SQL执行结果转换为自然语言回答"""
-    # 结果字符串最大长度，超过则截断
+
     MAX_RESULT_LENGTH = 2000
 
     def __init__(self):
@@ -31,7 +35,7 @@ class ResultFormatter:
                 (
                     "system",
                     """你是一个数据分析专家。请根据用户的问题、执行的SQL和查询结果，生成清晰、友好的自然语言回答。
-    
+
             回答规则：
             1. 使用中文回答
             2. 如果结果为空，说明没有找到相关数据
@@ -44,34 +48,51 @@ class ResultFormatter:
                 (
                     "human",
                     """用户问题：{question}
-    
+
             执行的SQL：{sql}
-            
+
             查询结果：{result}
-            
+
             请用自然语言回答用户问题：""",
                 ),
             ]
         )
-
         self.format_chain = self.format_prompt | self.llm
 
-    def format(self, question: str, sql: str, result: Union[List, Dict, Any]) -> str:
+    #  新的序列化方法
+    def _serialize_result(self, data: Any) -> str:
+        """
+        将包含 Decimal/日期等不可序列化对象的结果转换为截断后的 JSON 字符串
+        """
+        def _convert(obj: Any) -> Any:
+            if isinstance(obj, Decimal):
+                return float(obj)
+            elif isinstance(obj, (datetime, date)):
+                return obj.isoformat()
+            elif isinstance(obj, list):
+                return [_convert(item) for item in obj]
+            elif isinstance(obj, dict):
+                return {k: _convert(v) for k, v in obj.items()}
+            return obj
 
-        """
-        将SQL查询结果格式化为自然语言回答
-        Args:
-            question: 用户原始问题
-            sql: 执行的SQL语句
-            result: SQL查询结果
-        Returns:
-            自然语言格式化的回答
-        """
         try:
-            # 空结果快速返回
+            clean_data = _convert(data)
+            result_str = json.dumps(clean_data, ensure_ascii=False, indent=2)
+            # 防止超出 LLM 上下文窗口
+            if len(result_str) > self.MAX_RESULT_LENGTH:
+                result_str = result_str[: self.MAX_RESULT_LENGTH] + "\n... (数据已截断)"
+            return result_str
+        except Exception as e:
+            logger.warning(f"序列化结果失败，降级为 str(): {e}")
+            return str(data)[: self.MAX_RESULT_LENGTH]
+
+    def format(self, question: str, sql: str, result: Union[List, Dict, Any]) -> str:
+        """将SQL查询结果格式化为自然语言回答"""
+        try:
             if not result or (isinstance(result, (list, dict)) and len(result) == 0):
                 return f"未找到与「{question}」相关的数据"
 
+            #_serialize_result定义
             result_str = self._serialize_result(result)
             response = self.format_chain.invoke(
                 {"question": question, "sql": sql, "result": result_str}
@@ -79,26 +100,41 @@ class ResultFormatter:
             return response.content.strip()
 
         except Exception as e:
-            logger.error(f"结果格式化失败: {e}")
+            logger.error(f"结果格式化失败: {e}", exc_info=True)
             return self._simple_format(question, result)
 
     def _simple_format(self, question: str, result: Any) -> str:
         """降级格式化：当LLM调用失败时，使用简单规则格式化结果"""
         if not result:
             return f"未找到与「{question}」相关的数据"
-        # 列表类型结果
+
+        # 降级方案也需要处理 Decimal，避免打印出 Decimal('5999.00')
+        def _safe_str(val: Any) -> str:
+            if isinstance(val, Decimal):
+                return str(float(val))
+            return str(val)
+
         if isinstance(result, list):
             if len(result) == 1:
-                return f"查询结果：{result[0]}"
-            lines = [f"{i}. {row}" for i, row in enumerate(result, 1)]
+                row = result[0]
+                if isinstance(row, dict):
+                    items = ", ".join(f"{k}: {_safe_str(v)}" for k, v in row.items())
+                    return f"查询结果：{items}"
+                return f"查询结果：{_safe_str(row)}"
+            lines = []
+            for i, row in enumerate(result, 1):
+                if isinstance(row, dict):
+                    items = ", ".join(f"{k}: {_safe_str(v)}" for k, v in row.items())
+                    lines.append(f"{i}. {items}")
+                else:
+                    lines.append(f"{i}. {_safe_str(row)}")
             return "\n".join(lines)
-        # 字典类型结果（单行记录）
+
         if isinstance(result, dict):
-            lines = [f"- {k}: {v}" for k, v in result.items()]
+            lines = [f"- {k}: {_safe_str(v)}" for k, v in result.items()]
             return "查询结果：\n" + "\n".join(lines)
 
-        # 其他类型直接转字符串
-        return str(result)
+        return _safe_str(result)
 
 
 result_formatter = ResultFormatter()

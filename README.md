@@ -1,5 +1,5 @@
 1.项目初始化，构建项目结构
-  text2sql-langgraph/
+  初始结构 text2sql-langgraph/
     ├── app/
     │ ├── config/
     │ │ └── settings.py # 配置管理
@@ -21,8 +21,44 @@
         - Result 结果格式化服务
     - 完整的 Agent 工作流
     - 身份认证模块
-    - API 接口层
-    
+    - API 接口层   
+    阶段性结构： 实现api接口路由层和服务层的优化拆分  
+    服务层：执行业务逻辑，供路由层调用
+    路由层：定义HTTP接口，调用服务层,返回结果
+    text2sql-langgraph/  
+    ├── app/
+    │   ├── __init__.py
+    │   ├── main.py                    # FastAPI主入口
+    │   ├── config/
+    │   │   └── settings.py            # 配置管理
+    │   ├── core/
+    │   │   ├── __init__.py
+    │   │   └── database.py            # 数据库连接管理
+    │   ├── services/
+    │   │   ├── __init__.py
+    │   │   ├── sql_generator.py       # SQL生成服务
+    │   │   ├── sql_validator.py       # SQL安全校验
+    │   │   ├── rag_retrieval.py       # RAG表结构检索
+    │   │   ├── question_processor.py  # 问题意图识别与改写
+    │   │   └── result_formatter.py    # 结果格式化
+    │   │  
+    │   ├── agents/
+    │   │   ├── __init__.py
+    │   │   └── text2sql_agent.py      # LangGraph工作流
+    │   └── api/ 
+    │        ├── __init__.py          # 只负责汇总导出 router
+    │        ├── routes/              # 新建 routes 文件夹
+    │        │  ├── __init__.py      # 空文件
+    │        │  ├── auth.py          # 认证路由
+    │        │  └── query.py        # 查询路由
+    │        ├── auth.py              # 保留，只放 AuthService 类（服务层） 
+    │        └── query.py.py            #  查询服务逻辑
+    ├── db/
+    │   ├── init.sql                   # 数据库初始化
+    │   └── test_data.sql              # 测试数据
+    ├── .env                           # 环境变量
+    ├── requirements.txt               # 依赖清单
+    └── main.py                        # main主程序和启动脚本
     - webui界面
     - 测试与部署
     - 项目维护与更新
@@ -48,7 +84,7 @@
         在 analyze 失败时，返回一个默认的 Pydantic 对象而不是裸字典，保证类型一致性
     -RAG检索表结构服务 构建向量库 
         利用向量数据库根据用户问题检索相关的表结构，减少上下文长度并提高准确性
-      - 使用 all-MiniLM-L6-v2 模型生成表结构向量
+      - 使用 BGE- 模型生成表结构向量
       - 使用 Chroma 构建本地向量数据库(检索之前进行问题分析改写)
       - 基于用户问题检索相关表结构
       - 将表结构格式化为 LLM 可理解的 Prompt
@@ -65,8 +101,60 @@
     AgentState 状态定义（包含问题、表结构、SQL、结果等） 
     6个节点：process_question、generate_sql、validate_sql、execute_sql、retry_correction、summarize
     条件路由：执行失败时自动重试修正（最多max_retries次）
-    完整的工作流：问题处理 → SQL生成 → 校验 → 执行 → 重试修正 → 总结
+    工作流流程：用户问题 → 问题意图识别和改写RAG表结构检索 → SQL生成校验执行 → 结果格式化 → 返回回答
+                                                         ↓
+                                                  [执行失败] → SQL修正 → 重试校验与执行
 5.实现身份认证模块添加权限
    OAuth2 Password Bearer + JWT Refresh Token Rotation 认证体系。
    整个流程分为“首次登录”、“资源访问”和“无感刷新”三个核心阶段。生产环境引入redis缓存，提升性能。
-6.实现API接口层 
+6.实现API接口层路由和main.py
+   -用户认证接口
+   -LangGraph工作流查询接口
+
+已查询接口为例数据流程
+客户端请求
+  │
+  │  POST /query  { question: "查询订单数量", token: "xxx" }
+  │
+  ▼
+┌─────────────────────────────────────────────┐
+│  app/main.py                                │
+│  app.include_router(api_router)             │  ← 注册总路由
+└──────────────────┬──────────────────────────┘
+                   │
+                   ▼
+┌─────────────────────────────────────────────┐
+│  app/api/__init__.py                        │
+│  router.include_router(query_router)        │  ← 汇总注册
+└──────────────────┬──────────────────────────┘
+                   │
+                   ▼
+┌─────────────────────────────────────────────┐
+│  app/api/routes/query.py       【路由层】    │
+│                                             │
+│  1. 接收请求体 → QueryRequest               │
+│  2. Depends(get_current_user) → 校验Token   │  ← 认证拦截
+│  3. 调用 query_service.execute_query()      │  ← 调用服务层
+│  4. 返回 QueryResponse                      │
+└──────────┬──────────────────┬───────────────┘
+           │                  │
+           ▼                  ▼
+┌──────────────────┐  ┌──────────────────────────┐
+│  app/auth.py     │  │  app/api/query.py         │
+│  【认证服务层】   │  │  【查询服务层】            │
+│                  │  │                           │
+│  解析Token       │  │  组装inputs               │
+│  校验用户        │  │  调用text2sql_graph       │
+│  返回user dict   │  │  返回result dict          │
+└──────────────────┘  └───────────┬───────────────┘
+                                  │
+                                  ▼
+                    ┌──────────────────────────┐
+                    │  text2sql_graph.invoke() │
+                    │  【LangGraph Agent】     │
+                    │                          │
+                    │  意图识别 → RAG检索      │
+                    │  → SQL生成 → 校验       │
+                    │  → 执行 → 返回答案       │
+                    └──────────────────────────┘
+

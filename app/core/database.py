@@ -21,7 +21,7 @@ class DatabaseManager:
         """建立数据库连接，包括指数退避重试机制"""
         retry_count = 0
         max_retries = settings.MAX_RETRIES
-        delay = settings.DELAY
+        delay = settings.INITIAL_DELAY
         # 从 settings 中获取数据库连接 URL，避免在多处拼接
         db_url = settings.DB_URL
         while retry_count < max_retries:
@@ -87,68 +87,63 @@ class DatabaseManager:
             logger.error(f"获取表结构失败: {e}")
             return {}
 
-    def get_all_schemas(self) -> Dict[str:Dict[str, Any]]:
+    def get_all_schemas(self) -> Dict[str, Dict[str, Any]]:
         """获取数据库中所有表的 schema 信息"""
         if not self.engine:
             self.reconnect()
-            try:
-                tables = self.get_table_names()
-                schemas = {}
-                for table in tables:
-                    schemas[table] = self.get_table_schema(table)
-                return schemas
-            except Exception as e:
-                logger.error(f"获取所有表结构失败: {e}")
-                return {}
+        try:
+            tables = self.get_table_names()
+            schemas = {}
+            for table in tables:
+                schemas[table] = self.get_table_schema(table)
+            return schemas
+        except Exception as e:
+            logger.error(f"获取所有表结构失败: {e}")
+            return {}
 
-    def execute_query(self, query: str, params: Optional[Dict[str, Any]] = None) -> Result:
-        """执行 SQL 语句。
-       Args:
-           sql (str): 要执行的 SQL 语句。
-           params (dict, optional): SQL 语句的参数，用于防止 SQL 注入。
-       Returns:
-           tuple: 一个包含两个元素的元组。
-               - 第一个元素是查询结果，格式为字典列表。
-               - 第二个元素是错误信息，如果执行成功则为 None。
-       """
+    def execute_query(self, query: str, params: Optional[Dict[str, Any]] = None) -> tuple:
+        """
+        执行 SQL 语句。
+        Returns:
+            tuple: (结果列表或None, 错误信息或None)
+        """
         if not self.engine:
             try:
                 self.reconnect()
             except Exception as e:
                 logger.error(f"重新连接数据库失败: {e}")
                 return [], f"重新连接数据库失败: {e}"
-            try:
-                # 使用 text() 包装 SQL 语句以支持参数化查询
-                statement = text(query)
-                with self.engine.connect() as conn:
-                    result = conn.execute(statement, params)
-                # 对于 SELECT 等查询语句，需要 commit 才能在某些隔离级别下看到结果（虽然通常不需要）
-                # 对于 INSERT/UPDATE/DELETE，必须 commit 才会生效
-                # 这里统一 commit，对于只读连接或自动提交配置可能不适用，但作为通用方法比较稳妥
-                conn.commit()
-                # 只有当 result 有返回行时才尝试获取 keys 和 rows
+
+        try:
+            statement = text(query)
+            with self.engine.connect() as conn:
+                result = conn.execute(statement, params)
+
                 if result.returns_rows:
-                    columns = result.keys()
+                    columns = list(result.keys())
                     rows = result.fetchall()
-                    return [dict(zip(columns, row)) for row in rows], None
+                    data = [dict(zip(columns, row)) for row in rows]
+                    return data, None
                 else:
-                    # 对于没有返回行的语句（如 INSERT, UPDATE），返回受影响的行数
+                    conn.commit()
                     return [{"rowcount": result.rowcount}], None
-            except DisconnectionError:
-                # 捕获连接断开异常，尝试重连后再次执行
-                logger.warning("检测到数据库连接断开，正在尝试重连...")
-                try:
-                    self.reconnect()
-                    return self.execute_query(query, params)
-                except Exception as e:
-                    logger.error(f"重连后执行 SQL 仍然失败: {e}")
-                    return [], f"数据库连接异常: {e}"
-                except SQLAlchemyError as e:
-                    logger.error(f"SQL执行错误: {e}")
-                    return [], str(e)
-                except Exception as e:
-                    logger.error(f"SQL执行异常: {e}")
-                    return [], str(e)
+
+        except DisconnectionError:
+            logger.warning("检测到数据库连接断开，正在尝试重连...")
+            try:
+                self.reconnect()
+                return self.execute_query(query, params)
+            except Exception as e:
+                logger.error(f"重连后执行SQL仍然失败: {e}")
+                return [], f"数据库连接异常: {e}"
+
+        except SQLAlchemyError as e:
+            logger.error(f"SQL执行错误: {e}")
+            return [], str(e)
+
+        except Exception as e:
+            logger.error(f"SQL执行异常: {e}")
+            return [], str(e)
 
 
 db_manager = DatabaseManager()
