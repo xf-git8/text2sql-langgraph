@@ -145,65 +145,88 @@ class RagRetrieval:
             logger.error(f"调用问题改写失败: {e}")
             return question
 
-
-    def retrieve_relevant_tables(self, question: str, top_k: int = 5, threshold: float = 0.5) -> List[str]:
-        """根据问题检索相关表（带去重与阈值过滤）
+    def retrieval_relevant_tables(self, question: str, top_k: int = 5, threshold: float = 0.5) -> List[str]:
+        """根据问题检索相关表（带去重与阈值过滤 + 强制兜底）
         Args:
             question (str): 用户问题
             top_k (int): 返回相关表的最大数量
-            threshold (float): L2距离阈值，超过此值的结果将被过滤（值越小越相似）
+            threshold (float): L2距离阈值（值越小越严格）
         Returns:
-            List[str]: 去重后的相关表名列表
+            List[str]: 去重后的相关表名列表（保证至少返回部分结果）
         """
         if not self.vector_db:
             logger.warning("向量库未初始化")
             return []
 
-        # 1. 改写问题以提升检索精度
         rewritten_question = self._rewrite_question(question)
+
         try:
-            # 2. 多检索一些候选项，为去重和过滤留出余量
+            # 1. 扩大检索范围，为后续过滤和兜底准备
             results_with_scores = self.vector_db.similarity_search_with_score(
-                rewritten_question, k=top_k * 2
+                rewritten_question, k=top_k * 3  # 进一步扩大候选项
             )
+
+            if not results_with_scores:
+                logger.warning("向量检索无任何结果")
+                return []
+
+            # 2. 主逻辑：阈值过滤 + 去重
             seen = set()
             unique_tables = []
             for doc, score in results_with_scores:
                 table_name = doc.metadata.get("table_name")
-
-                # 3. 阈值过滤：L2距离越大表示越不相关，超过阈值直接跳过
-                if score > threshold:
-                    logger.debug(f"⏭️ 过滤低相关表: {table_name} (L2距离={score:.4f})")
+                if not table_name:
                     continue
-                # 4. 去重：保证每个表名只出现一次，且保留原始相关性排序
-                if table_name and table_name not in seen:
+
+                # 阈值过滤（L2距离越小越相关）
+                if score <= threshold and table_name not in seen:
                     seen.add(table_name)
                     unique_tables.append(table_name)
-                # 5. 达到目标数量后提前终止
-                if len(unique_tables) >= top_k:
-                    break
-            logger.info(f"检索到相关表(去重+过滤后): {unique_tables}")
+                    if len(unique_tables) >= top_k:
+                        break
+
+            # 3. 【核心修改】强制兜底策略
             if not unique_tables:
-                logger.warning("阈值过滤后无结果，回退到Top-K兜底策略")
+                logger.warning(f"阈值({threshold})过滤后无结果，强制启用兜底策略")
                 seen_fallback = set()
+                fallback_count = max(1, top_k // 2)  # 至少返回1个，最多返回一半
+
                 for doc, score in results_with_scores:
                     table_name = doc.metadata.get("table_name")
                     if table_name and table_name not in seen_fallback:
                         seen_fallback.add(table_name)
                         unique_tables.append(table_name)
-                    if len(unique_tables) >= max(1, top_k // 2):  # 至少返回1个，最多返回top_k的一半
-                        break
-                logger.info(f"兜底返回: {unique_tables}")
+                        if len(unique_tables) >= fallback_count:
+                            break
+
+                logger.info(f"兜底返回表: {unique_tables} (共{len(results_with_scores)}个候选项)")
+
+            # 4. 最终保底：如果还是空（极少情况），返回 Top-1
+            if not unique_tables and results_with_scores:
+                first_table = results_with_scores[0][0].metadata.get("table_name")
+                if first_table:
+                    unique_tables = [first_table]
+                    logger.info(f"最终保底返回 Top-1: {first_table}")
+
+            logger.info(f"最终返回相关表({len(unique_tables)}个): {unique_tables}")
             return unique_tables
 
         except Exception as e:
-            logger.error(f"检索失败: {e}")
+            logger.error(f"检索相关表失败: {e}", exc_info=True)
+            # 异常时也尝试返回最相关的 Top-1（兜底中的兜底）
+            try:
+                fallback = self.vector_db.similarity_search(question, k=1)
+                if fallback:
+                    table = fallback[0].metadata.get("table_name")
+                    return [table] if table else []
+            except:
+                pass
             return []
 
     def format_schemas_for_prompt(self, question: str, top_k: int = 5) -> str:
         """
         将 Schema 格式化为 LLM 可读的字符串
-        直接调用修改后的 retrieve_relevant_tables
+        直接调用修改后的 retrieval_relevant_tables
         """
         schemas = self.get_relevant_schemas(question, top_k)
         if not schemas:
@@ -232,7 +255,6 @@ class RagRetrieval:
         强制重建向量库（供手动调用）
         """
         logger.info("正在强制重建 Schema 向量库...")
-        logger.nfo("正在强制重建 Schema 向量库...")
         if os.path.exists(self.schema_db_path):
             shutil.rmtree(self.schema_db_path)
         self._build_vector_db()
@@ -246,7 +268,7 @@ class RagRetrieval:
         Returns:
             Dict[table_name(str), table_struct(Any)]: 相关表结构
         """
-        table_names = self.retrieve_relevant_tables(question, top_k)
+        table_names = self.retrieval_relevant_tables(question, top_k)
         schemas = {}
         for table_name in table_names:
             schema = db_manager.get_table_schema(table_name)

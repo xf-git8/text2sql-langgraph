@@ -55,56 +55,57 @@ class AgentState(TypedDict):
     retry_count: int           # 重试次数
     max_retries: int           # 最大重试次数
 
+# 状态初始化
+# ==================== 状态初始化 ====================
+def initialize_state(question: str, max_retries: int = 3) -> AgentState:
+    """必须在调用 graph.invoke 前使用"""
+    return {
+        "question": question,
+        "processed_question": "",
+        "intention": "",
+        "relevant_tables": [],
+        "schema_context": "",
+        "generated_sql": None,
+        "validation_result": {},
+        "execution_result": [],
+        "execution_error": None,
+        "answer": "",
+        "retry_count": 0,
+        "max_retries": max_retries,
+    }
 
 # --- 定义节点函数 ---
 
 
+# ==================== process_question_node ====================
 def process_question_node(state: AgentState) -> AgentState:
-    """
-    节点1：处理用户问题
-    功能：分析用户意图，并检索相关的数据库表结构信息。
-    """
-    # 调用服务来处理问题，返回重写后的问题、意图和相关表结构
     logger.info(f"处理问题: {state['question']}")
-    # 进行处理后问题
     question = state['question']
-    re_question = question_processor.rewrite(question, question_processor.analyze(question))
-    print(type(re_question))
-    print(re_question)
-    if re_question["intention"] == "invalid":
-        # 如果意图是无效的，则直接返回错误信息
+
+    analysis = question_processor.analyze(question)
+    re_question = question_processor.rewrite(question, analysis)
+
+    if re_question.get("intention") == "invalid":
         return {
             **state,
-            "processed_question": re_question["rewritten"],
+            "processed_question": re_question.get("rewritten", question),
             "intention": "invalid",
             "answer": "抱歉，我无法回答这个问题。请提出与数据库查询相关的问题。",
             "relevant_tables": [],
             "schema_context": "",
         }
-    # 检索库表结构
-    tables = rag_retrieval.retrieve_relevant_tables(question)
-    state['relevant_tables'] = tables
-    # 获取数据库 Schema 上下文信息 {key value}
-    schema_context = rag_retrieval.get_relevant_schemas(question)
-    state['schema_context'] = schema_context
 
-    # 如果问题改写，检索表结构然后 更新状态 传给下个节点
-    if re_question["intention"] == "rewrite":
-        return {
-            **state,
-            "processed_question": re_question["rewritten"],
-            "intention": re_question["intention"],
-            "relevant_tables": tables,
-            "schema_context": schema_context,
-        }
-    else:
-        return {
-            **state,
-            "processed_question": question,
-            "intention": re_question["intention"],
-            "relevant_tables": tables,
-            "schema_context": schema_context,
-        }
+    # RAG 检索
+    tables = rag_retrieval.retrieval_relevant_tables(question)
+    schema_context = rag_retrieval.get_relevant_schemas(question)
+
+    return {
+        **state,
+        "processed_question": re_question.get("rewritten", question),
+        "intention": re_question.get("intention", "query"),
+        "relevant_tables": tables,
+        "schema_context": schema_context,
+    }
 
 
 def generate_sql_node(state: AgentState) -> AgentState:
@@ -227,7 +228,7 @@ def summarize_node(state: AgentState) -> AgentState:
             "answer": f"SQL执行失败: {state['execution_error']}",
         }
 
-    # ✅ 如果校验失败（由条件边路由至此），直接返回校验错误
+    #  如果校验失败（由条件边路由至此），直接返回校验错误
     if not state.get("validation_result", {}).get("valid"):
         errors = state.get("validation_result", {}).get("errors", ["未知校验错误"])
         return {
@@ -248,30 +249,25 @@ def summarize_node(state: AgentState) -> AgentState:
     }
 
 
+# ==================== retry_correction_node  ====================
 def retry_correction_node(state: AgentState) -> AgentState:
-    """失败重试尝试修正节点"""
-
-    if state["intention"] == "invalid":
-        return state
-
-    if not state["execution_error"]:
+    if state["intention"] == "invalid" or not state.get("execution_error"):
         return state
 
     error = state["execution_error"]
-    sql = state["generated_sql"]
+    sql = state["generated_sql"] or ""
 
-    logger.info(f"修正SQL，错误: {error}")
-    corrected_sql = sql_generator.correct_sql(sql, error, state["schema_context"])
+    logger.info(f"尝试修正SQL，错误: {error}")
+    corrected_sql = sql_generator.correct_sql(sql, error, state.get("schema_context", ""))
 
-    # ✅ 修正后的 SQL 同样需要清洗
-    cleaned_corrected_sql = clean_llm_sql(corrected_sql)
-    logger.info(f"修正并清洗后SQL: {cleaned_corrected_sql}")
+    cleaned = clean_llm_sql(corrected_sql)
 
     return {
         **state,
-        "generated_sql": cleaned_corrected_sql,
+        "generated_sql": cleaned,
         "retry_count": state["retry_count"] + 1,
         "execution_error": None,
+        "validation_result": {},   # 重置校验结果
     }
 
 
@@ -316,7 +312,7 @@ def create_text2sql_graph():
     workflow.add_edge("process_question_node", "generate_sql_node")
     workflow.add_edge("generate_sql_node", "validate_sql_node")
 
-    # ✅ 校验通过后执行，校验失败直接进入总结节点报错（不再硬连线到 execute）
+    # 校验通过后执行
     workflow.add_conditional_edges(
         "validate_sql_node",
         should_execute,
@@ -325,19 +321,17 @@ def create_text2sql_graph():
             "summarize": "summarize_node",
         },
     )
-
-    # 添加条件边：从 execute_sql_node 指向 retry_correction_node
-    workflow.add_edge("execute_sql_node", "retry_correction_node")
-
-    # 添加条件边：从 retry_correction_node 根据 should_retry 的结果决定下一步
+    # execute 后直接判断是否需要重试（不强制走 retry_correction）
     workflow.add_conditional_edges(
-        "retry_correction_node",
+        "execute_sql_node",
         should_retry,
         {
-            "retry": "validate_sql_node",
-            "end": "summarize_node",
-        },
+            "retry": "retry_correction_node",  # 只有需要重试时才修正
+            "end": "summarize_node"
+        }
     )
+    # retry_correction 修正完后直接回到 generate 或 validate
+    workflow.add_edge("retry_correction_node", "validate_sql_node")
     workflow.add_edge("summarize_node", END)
 
     # 编译图
