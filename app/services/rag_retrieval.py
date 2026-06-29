@@ -99,11 +99,8 @@ class RagRetrieval:
             logger.warning("数据库中没有表结构信息，无法构建向量数据库。")
             return
         for table_name, schema in schemas.items():
-            if table_name in seen:
-                continue
             # 构建文档内容
             columns_info = [f"{col['name']} ({col['type']})" for col in schema["columns"]]
-
             # 优先使用数据库中的表注释/字段注释，而非机械生成
             table_comment = schema.get("comment", "") or f"存储{table_name}相关业务数据"
             col_comments = [f"{c['name']}:{c.get('comment', '')}" for c in schema["columns"] if c.get("comment")]
@@ -118,18 +115,7 @@ class RagRetrieval:
             )
             doc = Document(page_content=doc_content, metadata={"table_name": table_name})
             docs.append(doc)
-            # # 去重且保序
-            # if doc and doc not in seen:
-            #     seen.add(doc)
-            #     docs.append(doc)
         if docs:
-            # 构建前强制清空旧目录，防止 ChromaDB 增量追加导致重复
-            if os.path.exists(self.schema_db_path):
-                try:
-                    shutil.rmtree(self.schema_db_path)
-                    logger.info(f"🗑️ 已清除旧向量库缓存: {self.schema_db_path}")
-                except Exception as e:
-                    logger.error(f"清除旧向量库失败: {e}")
             # 创建并持久化
             self.vector_db = Chroma.from_documents(
                 documents=docs,
@@ -158,6 +144,7 @@ class RagRetrieval:
         except Exception as e:
             logger.error(f"调用问题改写失败: {e}")
             return question
+
 
     def retrieve_relevant_tables(self, question: str, top_k: int = 5, threshold: float = 0.5) -> List[str]:
         """根据问题检索相关表（带去重与阈值过滤）
@@ -212,6 +199,7 @@ class RagRetrieval:
         except Exception as e:
             logger.error(f"检索失败: {e}")
             return []
+
     def format_schemas_for_prompt(self, question: str, top_k: int = 5) -> str:
         """
         将 Schema 格式化为 LLM 可读的字符串
@@ -220,7 +208,6 @@ class RagRetrieval:
         schemas = self.get_relevant_schemas(question, top_k)
         if not schemas:
             return "未找到相关的数据库表结构。"
-
         prompt_parts = []
         for table_name, schema in schemas.items():
             columns = []
@@ -245,6 +232,7 @@ class RagRetrieval:
         强制重建向量库（供手动调用）
         """
         logger.info("正在强制重建 Schema 向量库...")
+        logger.nfo("正在强制重建 Schema 向量库...")
         if os.path.exists(self.schema_db_path):
             shutil.rmtree(self.schema_db_path)
         self._build_vector_db()

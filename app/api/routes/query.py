@@ -7,7 +7,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 # 导入服务层
 from app.api.query import query_service
 # 导入认证依赖函数（注意：导入的是函数，不是方法调用）
-from app.api.auth import get_current_user_dependency, auth_service
+from app.api.auth import get_current_user_dependency
 
 security = HTTPBearer()
 router = APIRouter(prefix="", tags=["查询模块"])
