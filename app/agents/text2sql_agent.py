@@ -121,7 +121,7 @@ def generate_sql_node(state: AgentState) -> AgentState:
     raw_sql = sql_generator.generate_sql(state['processed_question'], state['schema_context'])
     print(raw_sql)
 
-    # ✅ 在源头清洗 LLM 输出的 Markdown 标记，确保下游所有节点拿到纯净 SQL
+    #  在源头清洗 LLM 输出的 Markdown 标记，确保下游所有节点拿到纯净 SQL
     cleaned_sql = clean_llm_sql(raw_sql)
     logger.info(f"生成并清洗后SQL: {cleaned_sql}")
 
@@ -140,7 +140,7 @@ def validate_sql_node(state: AgentState) -> AgentState:
     if state["intention"] == "invalid":
         return state
 
-    # ✅ 使用已在 generate_sql_node 中清洗过的 SQL
+    #  使用已在 generate_sql_node 中清洗过的 SQL
     sql = state['generated_sql']
     logger.info(f"校验SQL: {sql}")
 

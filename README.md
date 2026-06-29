@@ -143,31 +143,30 @@
                      │
                      ▼
   ┌─────────────────────────────────────────────┐
-  │  app/api/routes/query.py       【路由层】    │
+  │  app/api/routes/query.py       【路由层】     │
   │                                             │
-  │  1. 接收请求体 → QueryRequest               │
-  │  2. Depends(get_current_user) → 校验Token   │  ← 认证拦截
-  │  3. 调用 query_service.execute_query()      │  ← 调用服务层
-  │  4. 返回 QueryResponse                      │
+  │  1. 接收请求体 → QueryRequest                 │
+  │  2. Depends(get_current_user) → 校验Token    │  ← 认证拦截
+  │  3. 调用 query_service.execute_query()       │  ← 调用服务层
+  │  4. 返回 QueryResponse                       │
   └──────────┬──────────────────┬───────────────┘
              │                  │
              ▼                  ▼
-  ┌──────────────────┐  ┌──────────────────────────┐
-  │  app/auth.py     │  │  app/api/query.py         │
-  │  【认证服务层】   │  │  【查询服务层】            │
-  │                  │  │                           │
-  │  解析Token       │  │  组装inputs               │
-  │  校验用户        │  │  调用text2sql_graph       │
-  │  返回user dict   │  │  返回result dict          │
-  └──────────────────┘  └───────────┬───────────────┘
+  ┌──────────────────┐  ┌─────────────────────────┐
+  │  app/auth.py     │  │  app/api/query.py       │
+  │  【认证服务层】     │  │  【查询服务层】           │
+  │                  │  │                         │
+  │  解析Token        │  │  组装inputs              │
+  │  校验用户          │  │  调用text2sql_graph      │
+  │  返回user dict    │  │  返回result dict         │
+  └──────────────────┘  └───────────┬──────────────┘
                                     │
                                     ▼
-                      ┌──────────────────────────┐
-                      │  text2sql_graph.invoke() │
+                      ┌─────────────────────────┐
+                      │  text2sql_graph.invoke()│
                       │  【LangGraph Agent】     │
-                      │                          │
-                      │  意图识别 → RAG检索      │
-                      │  → SQL生成 → 校验       │
-                      │  → 执行 → 返回答案       │
-                      └──────────────────────────┘
+                      │  意图识别 → RAG检索        │
+                      │  → SQL生成 → 校验         │
+                      │  → 执行 → 返回答案         │
+                      └─────────────────────────┘
   

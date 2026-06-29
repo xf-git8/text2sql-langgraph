@@ -94,20 +94,42 @@ class RagRetrieval:
         """构建向量数据库"""
         schemas = db_manager.get_all_schemas()
         docs = []
+        seen = set()
         if not schemas:
             logger.warning("数据库中没有表结构信息，无法构建向量数据库。")
             return
         for table_name, schema in schemas.items():
+            if table_name in seen:
+                continue
             # 构建文档内容
             columns_info = [f"{col['name']} ({col['type']})" for col in schema["columns"]]
+
+            # 优先使用数据库中的表注释/字段注释，而非机械生成
+            table_comment = schema.get("comment", "") or f"存储{table_name}相关业务数据"
+            col_comments = [f"{c['name']}:{c.get('comment', '')}" for c in schema["columns"] if c.get("comment")]
             doc_content = (
                 f"表名: {table_name}\n"
+                f"表说明: {table_comment}\n"
                 f"字段列表: {', '.join(columns_info)}\n"
-                f"用途: 存储与 {table_name.replace('_', ' ')} 相关的数据"
+                f"字段说明: {'; '.join(col_comments)}\n"
+                f"核心业务实体: {table_comment}\n"
+                f"适用查询类型: 当用户明确询问'{table_name}'相关字段时使用此表\n"
+                f"不适用场景: 如果用户未提及该实体或其同义词，请勿使用此表"
             )
             doc = Document(page_content=doc_content, metadata={"table_name": table_name})
             docs.append(doc)
+            # # 去重且保序
+            # if doc and doc not in seen:
+            #     seen.add(doc)
+            #     docs.append(doc)
         if docs:
+            # 构建前强制清空旧目录，防止 ChromaDB 增量追加导致重复
+            if os.path.exists(self.schema_db_path):
+                try:
+                    shutil.rmtree(self.schema_db_path)
+                    logger.info(f"🗑️ 已清除旧向量库缓存: {self.schema_db_path}")
+                except Exception as e:
+                    logger.error(f"清除旧向量库失败: {e}")
             # 创建并持久化
             self.vector_db = Chroma.from_documents(
                 documents=docs,
@@ -126,8 +148,8 @@ class RagRetrieval:
             return question
 
         try:
-            analysis_result =self.question_processor.analyze(question)
-            result =self.question_processor.rewrite(question, analysis_result)
+            analysis_result = self.question_processor.analyze(question)
+            result = self.question_processor.rewrite(question, analysis_result)
             # 假设 rewrite 方法返回的字典中包含 'rewritten' 字段
             # 且状态为 success
             if result.get("status") == "success":
@@ -137,31 +159,59 @@ class RagRetrieval:
             logger.error(f"调用问题改写失败: {e}")
             return question
 
-    def retrieve_relevant_tables(self, question: str, top_k: int = 5) -> List[str]:
-        """根据问题检索相关表
+    def retrieve_relevant_tables(self, question: str, top_k: int = 5, threshold: float = 0.5) -> List[str]:
+        """根据问题检索相关表（带去重与阈值过滤）
         Args:
             question (str): 用户问题
-            top_k (int): 返回相关表的数量
+            top_k (int): 返回相关表的最大数量
+            threshold (float): L2距离阈值，超过此值的结果将被过滤（值越小越相似）
         Returns:
-            List[str]: 相关表名列表
+            List[str]: 去重后的相关表名列表
         """
         if not self.vector_db:
             logger.warning("向量库未初始化")
             return []
-        # 检索之前对问题进行改写
-        # 1. 先改写问题
-        rewritten_question = self._rewrite_question(question)
 
+        # 1. 改写问题以提升检索精度
+        rewritten_question = self._rewrite_question(question)
         try:
-            # 2. 使用改写后的问题进行检索
-            results = self.vector_db.similarity_search(rewritten_question, k=top_k)
-            tables = [doc.metadata.get("table_name") for doc in results if doc.metadata.get("table_name")]
-            logger.info(f"检索到相关表: {tables}")
-            return tables
+            # 2. 多检索一些候选项，为去重和过滤留出余量
+            results_with_scores = self.vector_db.similarity_search_with_score(
+                rewritten_question, k=top_k * 2
+            )
+            seen = set()
+            unique_tables = []
+            for doc, score in results_with_scores:
+                table_name = doc.metadata.get("table_name")
+
+                # 3. 阈值过滤：L2距离越大表示越不相关，超过阈值直接跳过
+                if score > threshold:
+                    logger.debug(f"⏭️ 过滤低相关表: {table_name} (L2距离={score:.4f})")
+                    continue
+                # 4. 去重：保证每个表名只出现一次，且保留原始相关性排序
+                if table_name and table_name not in seen:
+                    seen.add(table_name)
+                    unique_tables.append(table_name)
+                # 5. 达到目标数量后提前终止
+                if len(unique_tables) >= top_k:
+                    break
+            logger.info(f"检索到相关表(去重+过滤后): {unique_tables}")
+            if not unique_tables:
+                logger.warning("阈值过滤后无结果，回退到Top-K兜底策略")
+                seen_fallback = set()
+                for doc, score in results_with_scores:
+                    table_name = doc.metadata.get("table_name")
+                    if table_name and table_name not in seen_fallback:
+                        seen_fallback.add(table_name)
+                        unique_tables.append(table_name)
+                    if len(unique_tables) >= max(1, top_k // 2):  # 至少返回1个，最多返回top_k的一半
+                        break
+                logger.info(f"兜底返回: {unique_tables}")
+            return unique_tables
+
         except Exception as e:
             logger.error(f"检索失败: {e}")
             return []
-
     def format_schemas_for_prompt(self, question: str, top_k: int = 5) -> str:
         """
         将 Schema 格式化为 LLM 可读的字符串
@@ -215,5 +265,6 @@ class RagRetrieval:
             if schema:
                 schemas[table_name] = schema
         return schemas
+
 
 rag_retrieval = RagRetrieval()
