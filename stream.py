@@ -13,34 +13,12 @@ if "messages" not in st.session_state:
 if "tables" not in st.session_state:
     st.session_state.tables = []
 
-
 # ==================== 通用请求头 ====================
 def get_headers():
     headers = {"Content-Type": "application/json"}
     if st.session_state.token:
         headers["Authorization"] = f"Bearer {st.session_state.token}"
     return headers
-
-
-# ==================== 获取表结构 ====================
-def fetch_tables():
-    try:
-        res = requests.post(
-            f"{API_BASE}/login",
-            json={"username": username, "password": password},
-            timeout=10,
-            proxies={"http": None, "https": None}
-        )
-        if res.status_code == 200:
-            data = res.json()
-            if isinstance(data.get("tables"), list):
-                st.session_state.tables = data["tables"]
-        elif res.status_code == 401:
-            st.session_state.token = None
-            st.rerun()
-    except Exception as e:
-        st.sidebar.warning(f"⚠️ 获取表结构失败: {e}")
-
 
 # ==================== 🔐 登录界面 ====================
 if not st.session_state.token:
@@ -60,8 +38,8 @@ if not st.session_state.token:
                     res = requests.post(
                         f"{API_BASE}/login",
                         json={
-                            "username": username,  # str 类型
-                            "password": password  # str 类型
+                            "username": username,
+                            "password": password
                         },
                         proxies={"http": None, "https": None},
                         timeout=10
@@ -72,7 +50,9 @@ if not st.session_state.token:
                         token = data.get("access_token")
                         if token:
                             st.session_state.token = token
-                            fetch_tables()
+                            # ✅ 修复点1: 直接在这里处理 tables 数据，删除了错误的 fetch_tables 函数
+                            if isinstance(data.get("tables"), list):
+                                st.session_state.tables = data["tables"]
                             st.success("✅ 登录成功！正在跳转...")
                             st.rerun()
                         else:
@@ -92,7 +72,6 @@ with st.sidebar:
     if st.session_state.tables:
         for table in st.session_state.tables:
             if st.button(table, key=f"tbl_{table}", use_container_width=True):
-                # 点击表名自动填入查询框（通过 session_state 传递）
                 st.session_state.prefill_question = f"查询 {table} 表的前10条数据"
                 st.rerun()
     else:
@@ -126,11 +105,11 @@ if prompt := st.chat_input("请输入自然语言查询问题...", ):
         with st.spinner("😕 正在分析并生成 SQL..."):
             try:
                 res = requests.post(
-                    f"{API_BASE}/query",  # 或者是你的其他接口地址
+                    f"{API_BASE}/query",
                     json={"question": prompt},
-                    headers={"Authorization": f"Bearer {st.session_state.token}"},
+                    # ✅ 修复点2: 使用封装好的 get_headers() 函数
+                    headers=get_headers(),
                     timeout=30,
-                    # ✅ 这里也要加上，防止查询时也走代理报错
                     proxies={"http": None, "https": None}
                 )
                 try:

@@ -3,7 +3,8 @@ from pydantic import BaseModel
 
 from fastapi import APIRouter, HTTPException
 # 从服务层导入唯一的单例对象
-from app.api.auth import auth_service
+from app.services.auth_service import auth_service
+
 
 router = APIRouter(prefix="", tags=["认证模块"])
 

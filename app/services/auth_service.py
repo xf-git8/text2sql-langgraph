@@ -1,8 +1,6 @@
-# app/api/auth.py
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
-from fastapi import HTTPException,Request
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 
@@ -44,6 +42,7 @@ class AuthService:
                 "disabled": False,
             }
         }
+
 
     # ==================== 密码处理 ====================
 
@@ -143,20 +142,3 @@ class AuthService:
 # 单例模式：整个应用共享这一个实例，避免重复初始化
 auth_service = AuthService()
 
-async def get_current_user_dependency(request: Request) -> dict:
-    """
-    FastAPI 依赖注入函数：从请求头中提取 Token 并验证用户身份
-    用法：current_user: dict = Depends(get_current_user_dependency)
-    """
-    # 1. 从 Authorization 头中提取 Bearer Token
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="未提供有效的认证令牌")
-
-    token = auth_header.split("Bearer ")[1].strip()
-
-    # 2. 调用 AuthService 的方法验证 Token
-    user = auth_service.get_current_user(token)
-    if not user:
-        raise HTTPException(status_code=401, detail="令牌无效或已过期")
-    return user

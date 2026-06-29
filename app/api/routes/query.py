@@ -1,13 +1,12 @@
 # app/api/routes/query.py
 from typing import Optional
 from pydantic import BaseModel
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import Request,APIRouter, Depends, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-
 # 导入服务层
-from app.api.query import query_service
-# 导入认证依赖函数（注意：导入的是函数，不是方法调用）
-from app.api.auth import get_current_user_dependency
+from app.api.deps import get_current_user
+from app.services import query_service
+
 
 security = HTTPBearer()
 router = APIRouter(prefix="", tags=["查询模块"])
@@ -33,19 +32,13 @@ class QueryResponse(BaseModel):
 @router.post("/query", response_model=QueryResponse)
 async def query(
         request: QueryRequest,
-        credentials: HTTPAuthorizationCredentials = Depends(security),
-        current_user: dict = Depends(get_current_user_dependency)
+        current_user: dict = Depends(get_current_user)
 ):
-    """
-    Text2SQL 自然语言查询接口
-    - 请求头需携带: Authorization: Bearer <access_token>
-    """
     try:
         result = await query_service.execute_query(
             question=request.question,
             max_retries=request.max_retries
         )
-
         return {
             "question": request.question,
             "answer": result.get("answer", ""),

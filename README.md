@@ -51,17 +51,17 @@
     │   └── api/ 
     │        ├── __init__.py          # 只负责汇总导出 router
     │        ├── routes/              # 新建 routes 文件夹
-    │        │  ├── __init__.py      # 空文件
-    │        │  ├── auth.py          # 认证路由
-    │        │  └── query.py        # 查询路由
-    │        ├── auth.py              # 保留，只放 AuthService 类（服务层） 
-    │        └── query.py.py            #  查询服务逻辑
+    │          ├── __init__.py      # 空文件
+    │          ├── auth.py          # 认证路由
+    │          └── query.py        # 查询路由
+    │                     
+    │              
     ├── db/
     │   ├── init.sql                   # 数据库初始化
     │   └── test_data.sql              # 测试数据
     ├── .env                           # 环境变量
     ├── requirements.txt               # 依赖清单
-    └── main.py                        # main主程序和启动脚本
+    └──run.py                         # 启动脚本(暂时和main放在一起)
     - webui界面
     - 测试与部署
     - 项目维护与更新
