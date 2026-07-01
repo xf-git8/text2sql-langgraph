@@ -98,7 +98,7 @@ class QuestionProcessor:
                 entities=[],
                 keywords=[],
                 confidence=0.0,
-                reasoning=f"解析错误: {str(e)}"
+                reason=f"解析错误: {str(e)}"
             )
     def rewrite(self, question: str, analysis_result: QuestionAnalysis) -> QuestionRewrite:
         """分析 -> (可选)改写返回统一的字典格式供后续流程使用

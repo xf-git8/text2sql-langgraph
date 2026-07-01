@@ -272,8 +272,6 @@ def retry_correction_node(state: AgentState) -> AgentState:
 
 
 # --- 条件路由函数 ---
-
-
 def should_execute(state: AgentState) -> Literal["execute", "summarize"]:
     """校验通过则执行，否则直接进入总结节点输出错误信息"""
     if state.get("validation_result", {}).get("valid"):
@@ -330,8 +328,8 @@ def create_text2sql_graph():
             "end": "summarize_node"
         }
     )
-    # retry_correction 修正完后直接回到 generate 或 validate
-    workflow.add_edge("retry_correction_node", "validate_sql_node")
+    # retry_correction 修正完后直接回到 generate
+    workflow.add_edge("retry_correction_node", "generate_sql_node")
     workflow.add_edge("summarize_node", END)
 
     # 编译图

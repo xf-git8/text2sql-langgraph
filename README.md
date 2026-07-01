@@ -1,6 +1,5 @@
 
 # 1.项目初始化，构建项目结构
-
  ## 初始结构 text2sql-langgraph/
     ├── app/
     │ ├── config/

@@ -113,6 +113,7 @@ class RagRetrieval:
                 f"适用查询类型: 当用户明确询问'{table_name}'相关字段时使用此表\n"
                 f"不适用场景: 如果用户未提及该实体或其同义词，请勿使用此表"
             )
+            # 以表名称作为元数据方便后续过滤
             doc = Document(page_content=doc_content, metadata={"table_name": table_name})
             docs.append(doc)
         if docs:
