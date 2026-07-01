@@ -169,4 +169,10 @@
                       │  → SQL生成 → 校验         │
                       │  → 执行 → 返回答案         │
                       └─────────────────────────┘
+
+<img width="1869" height="437" alt="image" src="https://github.com/user-attachments/assets/6cd2d077-b4e8-48e2-a628-9335d5c4394f" />
+
+
+<img width="1868" height="868" alt="image" src="https://github.com/user-attachments/assets/762a5909-2f5b-420d-bbbb-7b5a936e4e32" />
+
   
